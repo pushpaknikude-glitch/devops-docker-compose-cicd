@@ -33,11 +33,11 @@ Networks:
 
 ## Stack
 
-| Component | Image              | Role                          |
-|-----------|--------------------|-------------------------------|
-| NGINX     | nginx:1.25-alpine  | Reverse proxy, rate limiting, security headers |
-| Node.js   | node:20-alpine     | REST API (multi-stage build, non-root user) |
-| MongoDB   | mongo:7.0          | Persistent data store (internal network only) |
+| Component | Image             | Role                                           |
+|-----------|-------------------|------------------------------------------------|
+| NGINX     | nginx:1.25-alpine | Reverse proxy, rate limiting, security headers |
+| Node.js   | node:20-alpine    | REST API (multi-stage build, non-root user)    |
+| MongoDB   | mongo:7.0         | Persistent data store (internal network only)  |
 
 ---
 
@@ -81,7 +81,7 @@ Networks:
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/yourusername/devops-docker-compose-cicd.git
+git clone https://github.com/pushpaknikude-glitch/devops-docker-compose-cicd.git
 cd devops-docker-compose-cicd
 
 # 2. Set up environment
@@ -103,13 +103,13 @@ curl http://localhost/items
 
 ## API Endpoints
 
-| Method | Endpoint    | Description          |
-|--------|-------------|----------------------|
-| GET    | `/`         | Welcome message      |
+| Method | Endpoint     | Description                       |
+|--------|-------------|-----------------------------------|
+| GET    | `/`         | Welcome message                   |
 | GET    | `/health`   | Health check (DB status included) |
-| GET    | `/items`    | List all items       |
-| POST   | `/items`    | Create a new item    |
-| DELETE | `/items/:id`| Delete an item by ID |
+| GET    | `/items`    | List all items                    |
+| POST   | `/items`    | Create a new item                 |
+| DELETE | `/items/:id`| Delete an item by ID              |
 
 **Example:**
 ```bash
@@ -124,16 +124,16 @@ curl -X POST http://localhost/items \
 
 Set these under **Settings → CI/CD → Variables** in your GitLab project:
 
-| Variable               | Description                        | Protected |
-|------------------------|------------------------------------|-----------|
-| `DOCKER_HUB_USERNAME`  | Your Docker Hub username           | No        |
-| `DOCKER_HUB_TOKEN`     | Docker Hub access token            | ✅ Yes    |
-| `DEPLOY_SERVER_IP`     | Production server IP               | ✅ Yes    |
-| `DEPLOY_USER`          | SSH user on deploy server          | No        |
+| Variable                 | Description                       | Protected |
+|--------------------------|-----------------------------------|-----------|
+| `DOCKER_HUB_USERNAME`    | Your Docker Hub username          | No        |
+| `DOCKER_HUB_TOKEN`       | Docker Hub access token           | ✅ Yes    |
+| `DEPLOY_SERVER_IP`       | Production server IP              | ✅ Yes    |
+| `DEPLOY_USER`            | SSH user on deploy server         | No        |
 | `DEPLOY_SSH_PRIVATE_KEY` | SSH private key for server access | ✅ Yes    |
-| `MONGO_ROOT_USER`      | MongoDB root username              | ✅ Yes    |
-| `MONGO_ROOT_PASSWORD`  | MongoDB root password              | ✅ Yes    |
-| `MONGO_APP_PASSWORD`   | MongoDB app user password          | ✅ Yes    |
+| `MONGO_ROOT_USER`        | MongoDB root username             | ✅ Yes    |
+| `MONGO_ROOT_PASSWORD`    | MongoDB root password             | ✅ Yes    |
+| `MONGO_APP_PASSWORD`     | MongoDB app user password         | ✅ Yes    |
 
 ---
 
@@ -170,5 +170,6 @@ Defined in `docker-compose.yml` to prevent resource starvation:
 
 ## Author
 
-**Pushpak Nikude** — DevOps Engineer  
-[LinkedIn](https://linkedin.com/in/yourprofile) · [Docker Hub](https://hub.docker.com/u/yourusername)
+**Pushpak Nikude** — DevOps Engineer
+
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-pushpak--nikude-blue?style=flat&logo=linkedin)](https://www.linkedin.com/in/pushpak-nikude-68b0291b1/)
