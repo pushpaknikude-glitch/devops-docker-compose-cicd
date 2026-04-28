@@ -1,0 +1,192 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  GitLab CI/CD Pipeline
+#  Stack : NGINX + Node.js + MongoDB (Docker Compose)
+#  Stages: build → scan → deploy
+#  Author: Pushpak Nikude
+# ══════════════════════════════════════════════════════════════════════════════
+
+stages:
+  - build
+  - scan
+  - deploy
+
+# ── Global variables ──────────────────────────────────────────────────────────
+variables:
+  IMAGE_NAME: $DOCKER_HUB_USERNAME/devops-demo-api
+  IMAGE_TAG:  $CI_COMMIT_SHORT_SHA          # e.g. a3f9c12 — unique per commit
+  DEPLOY_HOST: $DEPLOY_SERVER_IP            # set in GitLab CI/CD variables
+
+# ── Templates (DRY) ──────────────────────────────────────────────────────────
+.docker_login: &docker_login
+  before_script:
+    - echo "$DOCKER_HUB_TOKEN" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE 1 — BUILD
+# ══════════════════════════════════════════════════════════════════════════════
+build:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  <<: *docker_login
+  script:
+    - echo "Building image → $IMAGE_NAME:$IMAGE_TAG"
+
+    # Build multi-stage production image
+    - docker build
+        --target production
+        --cache-from $IMAGE_NAME:latest
+        --build-arg BUILDKIT_INLINE_CACHE=1
+        -t $IMAGE_NAME:$IMAGE_TAG
+        -t $IMAGE_NAME:latest
+        ./app
+
+    # Push both tagged and latest
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - docker push $IMAGE_NAME:latest
+
+    # Save image tar for downstream jobs (avoids re-pulling)
+    - docker save $IMAGE_NAME:$IMAGE_TAG | gzip > image.tar.gz
+
+  artifacts:
+    paths:
+      - image.tar.gz
+    expire_in: 1 hour
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE 2 — SECURITY SCAN (Trivy)
+# ══════════════════════════════════════════════════════════════════════════════
+trivy:scan:
+  stage: scan
+  image: aquasec/trivy:latest
+  dependencies:
+    - build
+  script:
+    - echo "Loading image from artifact..."
+    - docker load < image.tar.gz || true
+
+    - echo "Running Trivy vulnerability scan..."
+    - trivy image
+        --exit-code 1
+        --severity HIGH,CRITICAL
+        --no-progress
+        --format table
+        $IMAGE_NAME:$IMAGE_TAG
+
+    # Also generate a full JSON report saved as artifact
+    - trivy image
+        --exit-code 0
+        --format json
+        --output trivy-report.json
+        $IMAGE_NAME:$IMAGE_TAG
+
+  artifacts:
+    when: always
+    paths:
+      - trivy-report.json
+    reports:
+      # Shows inline in GitLab Security Dashboard
+      container_scanning: trivy-report.json
+    expire_in: 7 days
+
+  allow_failure: false    # Pipeline FAILS on HIGH/CRITICAL CVEs
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE 3 — DEPLOY
+# ══════════════════════════════════════════════════════════════════════════════
+deploy:production:
+  stage: deploy
+  image: alpine:3.18
+  before_script:
+    # Install SSH client
+    - apk add --no-cache openssh-client
+    # Load private key from GitLab CI variable
+    - eval $(ssh-agent -s)
+    - echo "$DEPLOY_SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts
+
+  script:
+    - echo "Deploying $IMAGE_NAME:$IMAGE_TAG to $DEPLOY_HOST"
+
+    # Copy compose files and env to server
+    - scp docker-compose.yml $DEPLOY_USER@$DEPLOY_HOST:~/app/
+    - scp nginx/nginx.conf  $DEPLOY_USER@$DEPLOY_HOST:~/app/nginx/
+    - scp mongo-init/init.js $DEPLOY_USER@$DEPLOY_HOST:~/app/mongo-init/
+
+    # Remote deploy commands
+    - ssh $DEPLOY_USER@$DEPLOY_HOST "
+        set -e
+        cd ~/app
+
+        # Write .env from GitLab CI variables
+        cat > .env <<EOF
+        NODE_ENV=production
+        IMAGE_TAG=${IMAGE_TAG}
+        DOCKER_HUB_USERNAME=${DOCKER_HUB_USERNAME}
+        MONGO_ROOT_USER=${MONGO_ROOT_USER}
+        MONGO_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD}
+        MONGO_APP_PASSWORD=${MONGO_APP_PASSWORD}
+        EOF
+
+        # Pull latest image
+        docker pull ${IMAGE_NAME}:${IMAGE_TAG}
+
+        # Zero-downtime rolling restart
+        docker compose up -d --no-build --remove-orphans
+
+        # Wait for health checks to pass
+        sleep 15
+
+        # Verify all containers are healthy
+        docker compose ps
+
+        # Cleanup old images (keep last 3)
+        docker image prune -f
+      "
+
+    - echo "Deployment complete → $IMAGE_NAME:$IMAGE_TAG"
+
+  environment:
+    name: production
+    url: http://$DEPLOY_HOST
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: on_success   # Only runs after scan passes
+
+deploy:staging:
+  stage: deploy
+  image: alpine:3.18
+  before_script:
+    - apk add --no-cache openssh-client
+    - eval $(ssh-agent -s)
+    - echo "$DEPLOY_SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - ssh-keyscan -H $DEPLOY_HOST >> ~/.ssh/known_hosts
+
+  script:
+    - echo "Deploying $IMAGE_NAME:$IMAGE_TAG to staging"
+    - ssh $DEPLOY_USER@$DEPLOY_HOST "
+        cd ~/app-staging
+        export IMAGE_TAG=${IMAGE_TAG}
+        docker compose pull
+        docker compose up -d --remove-orphans
+      "
+
+  environment:
+    name: staging
+    url: http://$DEPLOY_HOST:8080
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: on_success
